@@ -1,0 +1,91 @@
+/*
+digraph CSV {
+    COMMA [shape=diamond,color=red];
+    NIL [shape=diamond,color=blue];
+    CRNL [shape=diamond,color=blue];
+    DQUOT [shape=diamond,color=green];
+    "?" [shape=diamond,color=black];
+
+    EOFLD [shape=box];
+    EOREC [shape=box];
+
+    START [shape=diamond];
+    InQuoted;
+    InUnquoted;
+    QuoteInQuote;
+
+    START -> EOFLD [label=","];
+    START -> EOREC [label="NIL or CRNL"];
+    START -> InQuoted [label="DQUOT"];
+    START -> InUnquoted [label="<default>"];
+
+    InQuoted -> QuoteInQuote [label="DQUOT"];
+    QuoteInQuote -> EOFLD [label=","];
+    QuoteInQuote -> InQuoted [label="DQUOT"];
+    QuoteInQuote -> EOREC [label="NIL or CRNL"];
+    InQuoted -> InQuoted [label="<default>"];
+
+    InUnquoted -> EOFLD [label=","];
+    InUnquoted -> EOREC [label="NIL or CRNL"];
+    InUnquoted -> InUnquoted [label="<default>"];
+}
+*/
+
+digraph CSV {
+    /*
+        ','    color=red
+        '\0'   color=blue
+        '\r'   color=blue
+        '\n'   color=blue
+        '"'    color=green
+        ' '    color=purple
+        ?      color=black
+    */
+    COMMA [label="COMMA\n','",shape=diamond,color=red];
+    NIL [label="NIL\n'\\0'",shape=diamond,color=blue];
+    CRNL [label="CRNL\n\"\\r\\n\" OR '\\r' OR '\\n'",shape=diamond,color=blue];
+    DQUOT [label="DQUOT\n'\"'",shape=diamond,color=green];
+    WS [label="WS\n' '",shape=diamond,color=purple];
+    "<default>" [label="<default>\nanything else",shape=diamond,color=black];
+
+    EOFLD [shape=box];
+    EOREC [shape=box];
+    STRIPWS [shape=box];
+
+    START [shape=diamond];
+    START_FIELD;
+    InQuoted;
+    InUnquoted;
+    QuoteInQuote;
+
+    START -> START_FIELD [color=purple,style=dashed];
+    START -> EOFLD [color=red,style=dashed];
+    START -> EOREC [color=blue,style=dashed];
+    START -> InQuoted [color=green,style=dashed];
+    START -> InUnquoted [style=bold];
+
+    START_FIELD -> START_FIELD [color=purple,style=dashed];
+    START_FIELD -> InQuoted [color=green,style=dashed];
+    START_FIELD -> InUnquoted [style=bold];
+
+    InQuoted -> QuoteInQuote [color=green,style=dashed];
+    QuoteInQuote -> EOFLD [color=red,style=dashed];
+    QuoteInQuote -> InQuoted [color=green,style=bold,weight=0.3];
+    QuoteInQuote -> EOREC [color=blue,style=dashed];
+    QuoteInQuote -> InQuoted [style=bold,label="Also emit WS",weight=0.2];
+    InQuoted -> InQuoted [style=bold];
+
+    InUnquoted -> EOFLD [color=red,style=dashed];
+    InUnquoted -> EOREC [color=blue,style=dashed];
+    InUnquoted -> InUnquoted [style="bold"];
+
+    EOFLD -> STRIPWS;
+    EOREC -> STRIPWS;
+
+    STRIPWS -> COMMA [style=invis];
+    STRIPWS -> NIL [style=invis];
+    STRIPWS -> CRNL [style=invis];
+    STRIPWS -> DQUOT [style=invis];
+    STRIPWS -> WS [style=invis];
+    STRIPWS -> "<default>" [style=invis];
+}
