@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include "csvparse.h"
+
 /** Notes
  *
  * All records (rows) must contain the same number of entries.
@@ -36,38 +38,11 @@
  *
  */
 
-#ifndef LIT
-#define LIT(s) (s)
-#endif
-
-#ifndef CHAR
-#define CHAR char
-#endif
-
-#ifndef STRLEN
-#define STRLEN strlen
-#endif
-
-#ifndef FPRINTF
-#define FPRINTF fprintf
-#endif
-
-#ifndef STDERR_FOBJ
-#define STDERR_FOBJ stderr
-#endif
-
 enum State {
     START_RECORD,
     IN_UNQUOT,
     IN_QUOTE,
     ESCAPE_IN_QUOTE
-};
-
-struct Opts {
-    CHAR quot;
-    CHAR delim;
-    CHAR escape;
-    bool escape_is_quot;
 };
 
 static bool iseol(CHAR c) {
@@ -78,9 +53,8 @@ static bool isws(CHAR c) {
     return c == LIT(' ');
 }
 
-static const CHAR* tok_csv(const CHAR* line, const CHAR** out,
-                           CHAR quot, CHAR delim) {
-    bool usequot = (quot != LIT('\0'));
+const CHAR* tok_dsv(const CHAR* line, const CHAR** out, CHAR quot,
+                    CHAR delim) {
     const CHAR* end = line;
     int state = START_RECORD;
     CHAR* buffer;
@@ -88,8 +62,8 @@ static const CHAR* tok_csv(const CHAR* line, const CHAR** out,
     bool done = false;
 
     if (iseol(*line)) {
-        *out = NULL;
-        return NULL;
+        *out = calloc(1, sizeof(CHAR));
+        return line;
     }
 
     buffer = bufpos = calloc(STRLEN(line)+1, sizeof(CHAR));
@@ -103,14 +77,14 @@ static const CHAR* tok_csv(const CHAR* line, const CHAR** out,
         switch (state) {
             case START_RECORD: {
                 /* initial state */
-                if (usequot && c == quot) {
+                if (quot && c == quot) {
                     state = IN_QUOTE;
                 } else if (c == delim) {
                     done = true;
                 } else if (iseol(c)) {
                     done = true;
                 } else if (isws(c)) {
-                    /* eat whitespace */
+                    /* eat initial whitespace */
                 } else {
                     *bufpos++ = c;
                     state = IN_UNQUOT;
@@ -128,18 +102,19 @@ static const CHAR* tok_csv(const CHAR* line, const CHAR** out,
             } break;
             case IN_QUOTE: {
                 /* main state: inside a quoted field */
-                if (usequot && c == quot) {
+                if (quot && c == quot) {
                     state = ESCAPE_IN_QUOTE;
                 } else if (c == LIT('\0')) {
                     done = true;
                 } else {
+                    /* no check for \r\n because those are allowed here */
                     *bufpos++ = c;
                 }
             } break;
             case ESCAPE_IN_QUOTE: {
                 /* encountered a quote in a quoted field, could be either an
                  * escaped dquot or the end of a field */
-                if (usequot && c == quot) {
+                if (quot && c == quot) {
                     /* escaped quote, emit one quote */
                     *bufpos++ = c;
                     state = IN_QUOTE;
@@ -159,16 +134,56 @@ static const CHAR* tok_csv(const CHAR* line, const CHAR** out,
                 abort();
                 break;
         }
+        /* never traverse past NIL */
         if (c != LIT('\0')) {
             ++end;
         }
     }
 
-    *out = buffer;
+    /* trim ending whitespace (stopping at empty) */
+    while (STRLEN(buffer) > 0 && isws(buffer[STRLEN(buffer)-1])) {
+        buffer[STRLEN(buffer)-1] = LIT('\0');
+    }
+
+    /* shrink buffer to proper size */
+    *out = realloc(buffer, (STRLEN(buffer)+1)*sizeof(CHAR));
 
     return end;
 }
 
+const CHAR** split_dsv(const CHAR* line, CHAR q, CHAR d) {
+    const CHAR** results = NULL;
+    int ridx = 0;
+    /* determine initial size */
+    int size = 0;
+    for (int i = 0; line[i]; ++i) {
+        if (line[i] == d) {
+            ++size;
+        }
+    }
+    results = calloc(sizeof(const CHAR*), size+1);
+    if (!results) {
+        return NULL;
+    }
+
+    const CHAR* r = line;
+    const CHAR* out = NULL;
+
+    while (r && *r) {
+        r = tok_dsv(r, &out, q, d);
+        results[ridx++] = out;
+    }
+
+    return realloc(results, (sizeof(const CHAR*)+1)*ridx);
+}
+
+const CHAR** parse_csv(const CHAR* line) {
+    return split_dsv(line, LIT('"'), LIT(','));
+}
+
+const CHAR** parse_psv(const CHAR* line) {
+    return split_dsv(line, LIT('\0'), LIT('|'));
+}
 
 #ifdef TEST
 
@@ -177,7 +192,7 @@ void run_test(const char* input, const char* expected[], char q, char d) {
     const char* out = NULL;
     for (int i = 0; expected[i]; ++i) {
         fprintf(stderr, "Testing %s...\n", r);
-        r = tok_csv(r, &out, q, d);
+        r = tok_dsv(r, &out, q, d);
         fprintf(stderr, "Obtained \"%s\" (%d)\n", out, (int)strlen(out));
         fprintf(stderr, "Expecting \"%s\"\n", expected[i]);
         assert(!strcmp(out, expected[i]));
@@ -201,6 +216,7 @@ int main(void) {
     run_test_csv("one,\"two\",three", ans1);
     run_test_csv("\"one\",\"two\",\"three\"", ans1);
     run_test_psv("one|two|three", ans1);
+    run_test_csv("  one  ,  two  ,  three  ", ans1);
 
     const char* ans2[] = {"one", "t\"w\"o", "th\"r\"ee", NULL};
     run_test_csv("one,t\"w\"o,\"th\"\"r\"\"ee\"", ans2);
@@ -225,94 +241,3 @@ int main(void) {
 
 #endif
 
-#if 0
-#ifndef bool
-#define bool int
-#endif
-
-#ifndef true
-#define true 1
-#define false 0
-#endif
-
-static char* csv_substr(const char* s, size_t start, size_t end) {
-    char* result = NULL;
-    int i = 0;
-    if (end - start <= 0) {
-        fprintf(stderr, "error: invalid range [%d,%d] for %s substr",
-                start, end, s);
-    }
-    result = calloc(end - start, sizeof(char));
-    for (i = start; i < end; ++i) {
-        result[i-start] = s[i];
-    }
-    return result;
-}
-
-static bool isquote(char c) {
-    return c == '"';
-}
-
-static bool issep(char c) {
-    return c == ',';
-}
-
-static bool iseol(char c) {
-    return c == '\0' || c == '\r' || c == '\n';
-}
-
-static const char* parse_eot(const char* piece) {
-    bool inquote = false;
-    bool infield = false;
-    const char* curr = piece;
-    while (*curr) {
-        if (isquote(*curr) && !infield) {
-            inquote = true;
-            ++curr;
-            infield = true;
-        }
-        if (*curr && isquote(*curr)) {
-            if (isquote(*(curr+1))) {
-                // pair quotes: "abcdef\"\"ghi"
-                curr += 2;
-            } else if (iseol(*(curr+1))) {
-            }
-        }
-        if (*curr && isquote(*curr) && iseol(*(curr+1))) {
-    }
-}
-
-char** csvparse(const char* line) {
-    char** results = NULL;
-    // 1) count how many elements to allocate
-    int nfields = 1;
-    bool inquote = false;
-    bool infield = false;
-    const char* start = NULL;
-    const char* curr = line;
-    while (!iseol(*curr)) {
-        if (*curr == '"') {
-            inquote = !inquote;
-        }
-        if (*curr == ',' && !inquote) {
-            nfields += 1;
-        }
-        ++curr;
-    }
-    if (inquote) {
-        fprintf(stderr, "parse error: expected \" before EOL in %s", line);
-        return NULL;
-    }
-    // 2) allocate
-    results = calloc(nfields, sizeof(char*));
-    if (!results) {
-        return NULL;
-    }
-    // 3) store items
-    start = curr = line;
-    while (!iseol(*curr)) {
-        
-    }
-}
-
-#endif
