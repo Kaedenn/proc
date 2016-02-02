@@ -1,9 +1,6 @@
 
-#include <assert.h>
 #include <stdlib.h>
 #include <stdio.h>
-#include <stdbool.h>
-#include <string.h>
 
 #include "csvparse.h"
 
@@ -45,35 +42,47 @@ enum State {
     ESCAPE_IN_QUOTE
 };
 
-static bool iseol(CHAR c) {
-    return c == LIT('\n') || c == LIT('\r') || c == LIT('\0');
+static bool iseol(TMCHAR c) {
+    return c == _TMC('\n') || c == _TMC('\r') || c == _TMC('\0');
 }
 
-static bool isws(CHAR c) {
-    return c == LIT(' ');
+static bool isws(TMCHAR c) {
+    return c == _TMC(' ');
 }
 
-const CHAR* tok_dsv(const CHAR* line, const CHAR** out, CHAR quot,
-                    CHAR delim) {
-    const CHAR* end = line;
+static
+const TMCHAR* tok_dsv_impl(const TMCHAR* line,  /* parse this line */
+                           const TMCHAR** out,  /* store parsed line here */
+                           TMCHAR quot,         /* the quot character '"' */
+                           TMCHAR delim,        /* the delim character ',' */
+                           bool strip_ws,       /* remove extra whitespace */
+                           bool tab_is_ws,      /* tabs are whitespace too */
+                           TMCHAR escape)       /* escape character '"' */
+{
+    return NULL;
+}
+
+const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
+                    TMCHAR delim) {
+    const TMCHAR* end = line;
     int state = START_RECORD;
-    CHAR* buffer;
-    CHAR* bufpos;
+    TMCHAR* buffer;
+    TMCHAR* bufpos;
     bool done = false;
 
     if (iseol(*line)) {
-        *out = calloc(1, sizeof(CHAR));
+        *out = calloc(1, sizeof(TMCHAR));
         return line;
     }
 
-    buffer = bufpos = calloc(STRLEN(line)+1, sizeof(CHAR));
+    buffer = bufpos = calloc(tmstrlen(line)+1, sizeof(TMCHAR));
     if (!buffer) {
         /* bail immediately if there's an allocation problem */
         return NULL;
     }
 
     while (!done) {
-        CHAR c = *end;
+        TMCHAR c = *end;
         switch (state) {
             case START_RECORD: {
                 /* initial state */
@@ -104,7 +113,7 @@ const CHAR* tok_dsv(const CHAR* line, const CHAR** out, CHAR quot,
                 /* main state: inside a quoted field */
                 if (quot && c == quot) {
                     state = ESCAPE_IN_QUOTE;
-                } else if (c == LIT('\0')) {
+                } else if (c == _TMC('\0')) {
                     done = true;
                 } else {
                     /* no check for \r\n because those are allowed here */
@@ -124,7 +133,7 @@ const CHAR* tok_dsv(const CHAR* line, const CHAR** out, CHAR quot,
                     done = true;
                 } else {
                     /* rogue quote: add it literaly */
-                    *bufpos++ = LIT('"');
+                    *bufpos++ = _TMC('"');
                     *bufpos++ = c;
                     state = IN_QUOTE;
                 }
@@ -135,24 +144,24 @@ const CHAR* tok_dsv(const CHAR* line, const CHAR** out, CHAR quot,
                 break;
         }
         /* never traverse past NIL */
-        if (c != LIT('\0')) {
+        if (c != _TMC('\0')) {
             ++end;
         }
     }
 
     /* trim ending whitespace (stopping at empty) */
-    while (STRLEN(buffer) > 0 && isws(buffer[STRLEN(buffer)-1])) {
-        buffer[STRLEN(buffer)-1] = LIT('\0');
+    while (tmstrlen(buffer) > 0 && isws(buffer[tmstrlen(buffer)-1])) {
+        buffer[tmstrlen(buffer)-1] = _TMC('\0');
     }
 
     /* shrink buffer to proper size */
-    *out = realloc(buffer, (STRLEN(buffer)+1)*sizeof(CHAR));
+    *out = realloc(buffer, (tmstrlen(buffer)+1)*sizeof(TMCHAR));
 
     return end;
 }
 
-const CHAR** split_dsv(const CHAR* line, CHAR q, CHAR d) {
-    const CHAR** results = NULL;
+const TMCHAR** split_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
+    const TMCHAR** results = NULL;
     int ridx = 0;
     /* determine initial size */
     int size = 0;
@@ -161,28 +170,28 @@ const CHAR** split_dsv(const CHAR* line, CHAR q, CHAR d) {
             ++size;
         }
     }
-    results = calloc(sizeof(const CHAR*), size+1);
+    results = calloc(sizeof(const TMCHAR*), size+1);
     if (!results) {
         return NULL;
     }
 
-    const CHAR* r = line;
-    const CHAR* out = NULL;
+    const TMCHAR* r = line;
+    const TMCHAR* out = NULL;
 
     while (r && *r) {
         r = tok_dsv(r, &out, q, d);
         results[ridx++] = out;
     }
 
-    return realloc(results, (sizeof(const CHAR*)+1)*ridx);
+    return realloc(results, (sizeof(const TMCHAR*)+1)*ridx);
 }
 
-const CHAR** parse_csv(const CHAR* line) {
-    return split_dsv(line, LIT('"'), LIT(','));
+const TMCHAR** parse_csv(const TMCHAR* line) {
+    return split_dsv(line, _TMC('"'), _TMC(','));
 }
 
-const CHAR** parse_psv(const CHAR* line) {
-    return split_dsv(line, LIT('\0'), LIT('|'));
+const TMCHAR** parse_psv(const TMCHAR* line) {
+    return split_dsv(line, _TMC('\0'), _TMC('|'));
 }
 
 #ifdef TEST
