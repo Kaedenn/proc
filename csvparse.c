@@ -194,6 +194,108 @@ const TMCHAR** parse_psv(const TMCHAR* line) {
     return split_dsv(line, _TMC('\0'), _TMC('|'));
 }
 
+const TMCHAR* format_csv(const TMCHAR** entries) {
+    TMCHAR* buffer = NULL;
+    size_t bufsize = 1; /* start with the NULL */
+    size_t entry_count = 0;
+    for (const TMCHAR* entry = *entries; entry; ++entry) {
+        entry_count += 1;
+        bufsize += tmstrlen(entry) + 3; /* 1 for NULL, 2 for quotes */
+    }
+
+    /* determine what needs to be quoted */
+    bool* should_quote = calloc(sizeof(bool), entry_count);
+    for (size_t qidx = 0; entries[qidx]; ++qidx) {
+        for (size_t i = 0; entries[qidx][i]; ++i) {
+            TMCHAR c = entries[qidx][i];
+            if (c == _TMC(' ') ||   /* quote anything with spaces */
+                c == _TMC('\r') ||  /* quote EOLs */
+                c == _TMC('\n') ||  /* quote EOLs */
+                c == _TMC(',') ||   /* quote commas */
+                (c == _TMC('"') &&  /* quote quotes at the ends */
+                 i == 0 || entries[qidx][i+1] == _TMC('\0'))) {
+                should_quote[qidx] = true;
+                break;
+            }
+        }
+    }
+
+    /* be pessimistic: assume everything is quotes */
+    bufsize *= 2;
+    buffer = calloc(sizeof(TMCHAR), bufsize);
+    if (!buffer) {
+        ua_exit(-1);
+    }
+
+    /* write the entries to the buffer */
+    size_t i = 0; /* idx to write to */
+    for (size_t ei = 0; entries[ei]; ++ei) {
+        if (ei != 0) {
+            if (i == bufsize) ua_exit(-1);
+            buffer[i++] = _TMC(',');
+        }
+        if (should_quote[ei]) {
+            if (i == bufsize) ua_exit(-1);
+            buffer[i++] = _TMC('"');
+        }
+        for (j = 0; entries[ei][j]; ++j) {
+            if (entries[ei][j] == _TMC('"')) {
+                if (i == bufsize) ua_exit(-1);
+                buffer[i++] = _TMC('"');
+            }
+            if (i == bufsize) ua_exit(-1);
+            buffer[i++] = entries[ei][j];
+        }
+        if (should_quote[ei]) {
+            if (i == bufsize) ua_exit(-1);
+            buffer[i++] = _TMC('"');
+        }
+    }
+
+    return realloc(buffer, tmstrlen(buffer) + 1);
+}
+
+const TMCHAR* format_psv(const TMCHAR** entries) {
+    TMCHAR* buffer = NULL;
+    size_t bufsize = 1; /* start with the NULL */
+    for (const TMCHAR* entry = *entries; entry; ++entry) {
+        bufsize += tmstrlen(entry) + 1;
+    }
+
+    /* allocate buffer with rough estimate of size */
+    buffer = calloc(sizeof(TMCHAR), bufsize);
+    if (!buffer) {
+        ua_exit(-1);
+    }
+
+    size_t i = 0;   /* idx to write to */
+    for (const TMCHAR* entry = *entries; entry; ++entry) {
+        if (entry != entries[0]) {
+            buffer[i++] = _TMC('|');
+        }
+        for (const TMCHAR* curr = entry; *curr; ++curr) {
+            if (i == bufsize) {
+                /* should be unreachable, but here just in case */
+                ua_exit(-1);
+            }
+            /* user should not provide pipes, but ignore them if they do */
+            if (*curr == _TMC('|')) {
+                continue;
+            } else {
+                buffer[i++] = *curr;
+            }
+        }
+    }
+
+    /* more error checking which should be never reached */
+    if (i == bufsize) {
+        ua_exit(-1);
+    }
+
+    /* +1 for NULL */
+    return realloc(buffer, i+1);
+}
+
 #ifdef TEST
 
 void run_test(const char* input, const char* expected[], char q, char d) {
