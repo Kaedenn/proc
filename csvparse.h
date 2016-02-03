@@ -6,10 +6,27 @@
 
 #include <stdint.h>
 
+#ifdef NON_UA_ISOLATED_TEST
+
+#define TMCHAR char
+#define _TMC(s) s
+#define tmstrlen strlen
+#define ua_exit exit
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <assert.h>
+
+#else
+
 #if !defined(csvBundle_EXISTS)
   #include "tmcilib.h"
   static struct TMBundle csvBundle = {"csvparse.c", NULL, NULL, NULL, NULL};
   #define csvBundle_EXISTS
+#endif
+
 #endif
 
 /* RFC 4180 "Common Format and MIME Type for CSV Files" defines the following

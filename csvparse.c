@@ -213,7 +213,7 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
                 c == _TMC('\n') ||  /* quote EOLs */
                 c == _TMC(',') ||   /* quote commas */
                 (c == _TMC('"') &&  /* quote quotes at the ends */
-                 i == 0 || entries[qidx][i+1] == _TMC('\0'))) {
+                 (i == 0 || entries[qidx][i+1] == _TMC('\0')))) {
                 should_quote[qidx] = true;
                 break;
             }
@@ -238,7 +238,7 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
             if (i == bufsize) ua_exit(-1);
             buffer[i++] = _TMC('"');
         }
-        for (j = 0; entries[ei][j]; ++j) {
+        for (size_t j = 0; entries[ei][j]; ++j) {
             if (entries[ei][j] == _TMC('"')) {
                 if (i == bufsize) ua_exit(-1);
                 buffer[i++] = _TMC('"');
