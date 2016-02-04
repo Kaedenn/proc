@@ -198,9 +198,9 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
     TMCHAR* buffer = NULL;
     size_t bufsize = 1; /* start with the NULL */
     size_t entry_count = 0;
-    for (const TMCHAR* entry = *entries; entry; ++entry) {
+    for (const TMCHAR** entry = entries; entry; ++entry) {
         entry_count += 1;
-        bufsize += tmstrlen(entry) + 3; /* 1 for NULL, 2 for quotes */
+        bufsize += tmstrlen(*entry) + 3; /* 1 for NULL, 2 for quotes */
     }
 
     /* determine what needs to be quoted */
@@ -258,8 +258,8 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
 const TMCHAR* format_psv(const TMCHAR** entries) {
     TMCHAR* buffer = NULL;
     size_t bufsize = 1; /* start with the NULL */
-    for (const TMCHAR* entry = *entries; entry; ++entry) {
-        bufsize += tmstrlen(entry) + 1;
+    for (const TMCHAR** entry = entries; *entry; ++entry) {
+        bufsize += tmstrlen(*entry) + 1;
     }
 
     /* allocate buffer with rough estimate of size */
@@ -269,11 +269,11 @@ const TMCHAR* format_psv(const TMCHAR** entries) {
     }
 
     size_t i = 0;   /* idx to write to */
-    for (const TMCHAR* entry = *entries; entry; ++entry) {
-        if (entry != entries[0]) {
+    for (const TMCHAR** entry = entries; *entry; ++entry) {
+        if (*entry != entries[0]) {
             buffer[i++] = _TMC('|');
         }
-        for (const TMCHAR* curr = entry; *curr; ++curr) {
+        for (const TMCHAR* curr = *entry; *curr; ++curr) {
             if (i == bufsize) {
                 /* should be unreachable, but here just in case */
                 ua_exit(-1);
@@ -298,54 +298,71 @@ const TMCHAR* format_psv(const TMCHAR** entries) {
 
 #ifdef TEST
 
-void run_test(const char* input, const char* expected[], char q, char d) {
-    const char* r = input;
-    const char* out = NULL;
+#define EPRINTF(...) tmfprintf(&tmBundle, tmstderr, __VA_ARGS__)
+
+void run_test(const TMCHAR* input, const TMCHAR* expected[], TMCHAR q, TMCHAR d) {
+    const TMCHAR* r = input;
+    const TMCHAR* out = NULL;
     for (int i = 0; expected[i]; ++i) {
-        fprintf(stderr, "Testing %s...\n", r);
+        EPRINTF(_TMC("Testing %s...\n"), r);
         r = tok_dsv(r, &out, q, d);
-        fprintf(stderr, "Obtained \"%s\" (%d)\n", out, (int)strlen(out));
-        fprintf(stderr, "Expecting \"%s\"\n", expected[i]);
+        EPRINTF(_TMC("Obtained \"%s\" (%d)\n"), out, (int)strlen(out));
+        EPRINTF(_TMC("Expecting \"%s\"\n"), expected[i]);
         assert(!strcmp(out, expected[i]));
         free((void*)out);
         out = NULL;
     }
-    fprintf(stderr, "PASS\n");
+    tmfprintf(&tmBundle, tmstderr, _TMC("PASS\n"));
 }
 
-void run_test_csv(const char* i, const char** ex) {
-    run_test(i, ex, '"', ',');
+void run_test_csv(const TMCHAR* i, const TMCHAR** ex) {
+    run_test(i, ex, _TMC('"'), _TMC(','));
 }
 
-void run_test_psv(const char* i, const char** ex) {
-    run_test(i, ex, '\0', '|');
+void run_test_psv(const TMCHAR* i, const TMCHAR** ex) {
+    run_test(i, ex, _TMC('\0'), _TMC('|'));
+}
+
+void run_test_fmt(const TMCHAR** items /*, const TMCHAR* expected */) {
+    const TMCHAR* result = format_psv(items);
+    EPRINTF(_TMC("Ended up with %s\n"), result);
+    free((void*)result);
+    result = format_csv(items);
+    EPRINTF(_TMC("Ended up with %s\n"), result);
+    free((void*)result);
 }
 
 int main(void) {
-    const char* ans1[] = {"one", "two", "three", NULL};
-    run_test_csv("one,two,three", ans1);
-    run_test_csv("one,\"two\",three", ans1);
-    run_test_csv("\"one\",\"two\",\"three\"", ans1);
-    run_test_psv("one|two|three", ans1);
-    run_test_csv("  one  ,  two  ,  three  ", ans1);
+    const TMCHAR* ans1[] = {_TMC("one"), _TMC("two"), _TMC("three"), NULL};
+    run_test_csv(_TMC("one,two,three"), ans1);
+    run_test_csv(_TMC("one,\"two\",three"), ans1);
+    run_test_csv(_TMC("\"one\",\"two\",\"three\""), ans1);
+    run_test_psv(_TMC("one|two|three"), ans1);
+    run_test_csv(_TMC("  one  ,  two  ,  three  "), ans1);
 
-    const char* ans2[] = {"one", "t\"w\"o", "th\"r\"ee", NULL};
-    run_test_csv("one,t\"w\"o,\"th\"\"r\"\"ee\"", ans2);
-    run_test_psv("one|t\"w\"o|th\"r\"ee", ans2);
+    const TMCHAR* ans2[] = {_TMC("one"), _TMC("t\"w\"o"), _TMC("th\"r\"ee"), NULL};
+    run_test_csv(_TMC("one,t\"w\"o,\"th\"\"r\"\"ee\""), ans2);
+    run_test_psv(_TMC("one|t\"w\"o|th\"r\"ee"), ans2);
 
-    const char* ans3[] = {"one", "two\nthree", "four", NULL};
-    run_test_csv("one,\"two\nthree\",four", ans3);
+    const TMCHAR* ans3[] = {_TMC("one"), _TMC("two\nthree"), _TMC("four"), NULL};
+    run_test_csv(_TMC("one,\"two\nthree\",four"), ans3);
     /* NOTE: PSV cannot encode newlines (possible future feature) */
 
-    const char* ans4[] = {"one", "", "three", NULL};
-    run_test_csv("one,\"\",three", ans4);
-    run_test_csv("one,,three", ans4);
-    run_test_psv("one||three", ans4);
+    const TMCHAR* ans4[] = {_TMC("one"), _TMC(""), _TMC("three"), NULL};
+    run_test_csv(_TMC("one,\"\",three"), ans4);
+    run_test_csv(_TMC("one,,three"), ans4);
+    run_test_psv(_TMC("one||three"), ans4);
 
-    const char* ans5[] = {"", "", "three", "", NULL};
-    run_test_csv(",\"\",\"three\",\"\"", ans5);
-    run_test_csv(",,three,", ans5);
-    run_test_psv("||three|", ans5);
+    const TMCHAR* ans5[] = {_TMC(""), _TMC(""), _TMC("three"), _TMC(""), NULL};
+    run_test_csv(_TMC(",\"\",\"three\",\"\""), ans5);
+    run_test_csv(_TMC(",,three,"), ans5);
+    run_test_psv(_TMC("||three|"), ans5);
+
+    run_test_fmt(ans1);
+    run_test_fmt(ans2);
+    run_test_fmt(ans3);
+    run_test_fmt(ans4);
+    run_test_fmt(ans5);
 
     return 0;
 }

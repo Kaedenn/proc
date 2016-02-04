@@ -12,6 +12,8 @@
 #define _TMC(s) s
 #define tmstrlen strlen
 #define ua_exit exit
+#define tmstderr stderr
+#define tmfprintf(bundle, fdes, ...) fprintf(fdes, __VA_ARGS__)
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -92,6 +94,9 @@ const TMCHAR** parse_psv(const TMCHAR* line); /* uses pipes */
 
 /* specific APIs: write items to proper CSV and PSV formats */
 
+#define VFORMAT_CSV(...) do { \
+    const TMCHAR** entries = {__VA_ARGS__}; \
+} while (0)
 const TMCHAR* format_csv(const TMCHAR** entries);
 const TMCHAR* format_psv(const TMCHAR** entries);
 
