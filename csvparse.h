@@ -9,11 +9,14 @@
 #ifdef NON_UA_ISOLATED_TEST
 
 #define TMCHAR char
+#define UFILE FILE
 #define _TMC(s) s
 #define tmstrlen strlen
 #define ua_exit exit
 #define tmstderr stderr
 #define tmfprintf(bundle, fdes, ...) fprintf(fdes, __VA_ARGS__)
+#define tmfopen(bundle, fname, mode) fopen(fname, mode)
+#define tmfclose(fdes) fclose(fdes)
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -94,17 +97,24 @@ const TMCHAR** parse_psv(const TMCHAR* line); /* uses pipes */
 
 /* specific APIs: write items to proper CSV and PSV formats */
 
-#define VFORMAT_CSV(...) do { \
-    const TMCHAR** entries = {__VA_ARGS__}; \
-} while (0)
+enum Quoting {
+    QUOTE_NECESSARY,
+    QUOTE_ALL,
+    QUOTE_NONE
+};
+
+const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
+                         TMCHAR quote, TMCHAR delim);
+
 const TMCHAR* format_csv(const TMCHAR** entries);
 const TMCHAR* format_psv(const TMCHAR** entries);
+
+void write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv);
+void write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv);
 
 /* TODO:
  * const TMCHAR* line = FORMAT_CSV(opts.pidm, opts.id, opts.name, ...);
  */
-
-#define FORMAT_CSV(...)
 
 /* Layout
  *
@@ -130,6 +140,8 @@ const TMCHAR* format_psv(const TMCHAR** entries);
  * the csv_expand typedef, as csv_obj.expand_fn.
  *
  */
+
+#if 0
 
 typedef size_t(csv_expand)(size_t bytes);
 
@@ -189,6 +201,8 @@ const TMCHAR* csv_entry(struct csv* csv, size_t row, size_t col);
 
 /* obtain the content of the entry at the row and col name given */
 const TMCHAR* csv_entry_byname(struct csv* csv, size_t row, const TMCHAR* name);
+
+#endif
 
 #endif // defined CSVPARSE_HEADER_INCLUDED_
 

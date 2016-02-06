@@ -50,20 +50,8 @@ static bool isws(TMCHAR c) {
     return c == _TMC(' ');
 }
 
-static
-const TMCHAR* tok_dsv_impl(const TMCHAR* line,  /* parse this line */
-                           const TMCHAR** out,  /* store parsed line here */
-                           TMCHAR quot,         /* the quot character '"' */
-                           TMCHAR delim,        /* the delim character ',' */
-                           bool strip_ws,       /* remove extra whitespace */
-                           bool tab_is_ws,      /* tabs are whitespace too */
-                           TMCHAR escape)       /* escape character '"' */
-{
-    return NULL;
-}
-
 const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
-                    TMCHAR delim) {
+                      TMCHAR delim) {
     const TMCHAR* end = line;
     int state = START_RECORD;
     TMCHAR* buffer;
@@ -194,13 +182,49 @@ const TMCHAR** parse_psv(const TMCHAR* line) {
     return split_dsv(line, _TMC('\0'), _TMC('|'));
 }
 
+const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
+                         TMCHAR quote, TMCHAR delim) {
+    TMCHAR* buffer = NULL;
+    size_t bufsize = 1; /* start with 1 for NIL */
+    size_t bufpos = 0; /* offset to write to */
+    size_t nentries = 0;
+    for (size_t i = 0; entries[i]; ++i) {
+        nentries += 1;
+        /* 2 for quotes, and 1 for delim */
+        bufsize += tmstrlen(entries[i]) + 3;
+    }
+    /* short-circuit for an empty vector of entries */
+    if (nentries == 0) {
+        return calloc(sizeof(TMCHAR), 1);
+    }
+    bufsize *= 2; /* for quoting, assume worst case */
+    buffer = calloc(sizeof(TMCHAR), bufsize);
+
+    bool* should_quote = calloc(sizeof(bool), nentries);
+    if (quote_style == QUOTE_NECESSARY) {
+        for (size_t i = 0; entries[i]; ++i) {
+            for (size_t j = 0; entries[i][j]; ++j) {
+                TMCHAR c = entries[i][j];
+            }
+        }
+    } else if (quote_style == QUOTE_ALL) {
+        for (size_t i = 0; i < nentries; ++i) {
+            should_quote[i] = true;
+        }
+    }
+    /* TODO */
+}
+
 const TMCHAR* format_csv(const TMCHAR** entries) {
+    size_t entry_count = 0;
     TMCHAR* buffer = NULL;
     size_t bufsize = 1; /* start with the NULL */
-    size_t entry_count = 0;
-    for (const TMCHAR** entry = entries; entry; ++entry) {
+    size_t i = 0; /* buffer idx to write to */
+
+    for (const TMCHAR** entry = entries; *entry; ++entry) {
         entry_count += 1;
-        bufsize += tmstrlen(*entry) + 3; /* 1 for NULL, 2 for quotes */
+        /* 1 for NIL, 2 for quotes, 1 for delim */
+        bufsize += tmstrlen(*entry) + 4;
     }
 
     /* determine what needs to be quoted */
@@ -228,7 +252,6 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
     }
 
     /* write the entries to the buffer */
-    size_t i = 0; /* idx to write to */
     for (size_t ei = 0; entries[ei]; ++ei) {
         if (ei != 0) {
             if (i == bufsize) ua_exit(-1);
@@ -279,10 +302,14 @@ const TMCHAR* format_psv(const TMCHAR** entries) {
                 ua_exit(-1);
             }
             /* user should not provide pipes, but ignore them if they do */
-            if (*curr == _TMC('|')) {
-                continue;
-            } else {
-                buffer[i++] = *curr;
+            switch (*curr) {
+                case _TMC('|'):
+                case _TMC('\r'):
+                case _TMC('\n'):
+                    continue;
+                default:
+                    buffer[i++] = *curr;
+                    break;
             }
         }
     }
@@ -294,6 +321,24 @@ const TMCHAR* format_psv(const TMCHAR** entries) {
 
     /* +1 for NULL */
     return realloc(buffer, i+1);
+}
+
+void write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv) {
+    UFILE* f = tmfopen(&tmBundle, path, mode);
+    if (!f) { ua_exit(-1); }
+    const TMCHAR* line = format_csv(csv);
+    tmfprintf(&tmBundle, f, "{0}\n", line);
+    free((void*)line);
+    tmfclose(f);
+}
+
+void write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv) {
+    UFILE* f = tmfopen(&tmBundle, path, mode);
+    if (!f) { ua_exit(-1); }
+    const TMCHAR* line = format_psv(psv);
+    tmfprintf(&tmBundle, f, "{0}\n", line);
+    free((void*)line);
+    tmfclose(f);
 }
 
 #ifdef TEST
