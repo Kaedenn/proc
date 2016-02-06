@@ -50,6 +50,15 @@ static bool isws(TMCHAR c) {
     return c == _TMC(' ');
 }
 
+static bool util_isnumeric(const TMCHAR* s) {
+    for (int i = 0; s[i]; ++i) {
+        if (!(s[i] >= _TMC('0') && s[i] <= _TMC('9'))) {
+            return false;
+        }
+    }
+    return true;
+}
+
 const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
                       TMCHAR delim) {
     const TMCHAR* end = line;
@@ -183,7 +192,7 @@ const TMCHAR** parse_psv(const TMCHAR* line) {
 }
 
 const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
-                         TMCHAR quote, TMCHAR delim) {
+                         TMCHAR quote, TMCHAR delim, TMCHAR escape) {
     TMCHAR* buffer = NULL;
     size_t bufsize = 1; /* start with 1 for NIL */
     size_t bufpos = 0; /* offset to write to */
@@ -200,19 +209,67 @@ const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
     bufsize *= 2; /* for quoting, assume worst case */
     buffer = calloc(sizeof(TMCHAR), bufsize);
 
+    /* no escape character -> double quote to escape */
+    if (escape == _TMC('\0')) {
+        escape = quote;
+    }
+
     bool* should_quote = calloc(sizeof(bool), nentries);
     if (quote_style == QUOTE_NECESSARY) {
         for (size_t i = 0; entries[i]; ++i) {
-            for (size_t j = 0; entries[i][j]; ++j) {
-                TMCHAR c = entries[i][j];
+            const TMCHAR* entry = entries[i];
+            for (size_t j = 0; entry[j]; ++j) {
+                TMCHAR c = entry[j];
+                if (c == _TMC('\r') || c == _TMC('\n') || c == delim) {
+                    should_quote[i] = true;
+                }
+                if (j == 0 || entry[j+1] == _TMC('\0')) {
+                    if (c == quote || c == _TMC(' ')) {
+                        should_quote[i] = true;
+                    }
+                }
             }
         }
     } else if (quote_style == QUOTE_ALL) {
         for (size_t i = 0; i < nentries; ++i) {
             should_quote[i] = true;
         }
+    } else if (quote_style == QUOTE_NONNUMERIC) {
+        for (size_t i = 0; i < nentries; ++i) {
+            if (!util_isnumeric(entries[i])) {
+                should_quote[i] = true;
+            }
+        }
     }
-    /* TODO */
+
+    for (size_t i = 0; entries[i]; ++i) {
+        if (i != 0) {
+            if (bufpos == bufsize) ua_exit(-1);
+            buffer[bufpos++] = delim;
+        }
+        if (should_quote[i]) {
+            if (bufpos == bufsize) ua_exit(-1);
+            buffer[bufpos++] = quote;
+        }
+
+        for (size_t j = 0; entries[i][j]; ++j) {
+            TMCHAR c = entries[i][j];
+            if (c == quote || c == delim || c == escape) {
+                if (bufpos == bufsize) ua_exit(-1);
+                buffer[bufpos++] = escape;
+            }
+            if (bufpos == bufsize) ua_exit(-1);
+            buffer[bufpos++] = c;
+        }
+
+        if (should_quote[i]) {
+            if (bufpos == bufsize) ua_exit(-1);
+            buffer[bufpos++] = quote;
+        }
+    }
+
+    free((void*)should_quote);
+    return realloc(buffer, tmstrlen(buffer)+1);
 }
 
 const TMCHAR* format_csv(const TMCHAR** entries) {
@@ -275,6 +332,7 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
         }
     }
 
+    free((void*)should_quote);
     return realloc(buffer, tmstrlen(buffer) + 1);
 }
 
@@ -327,7 +385,7 @@ void write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv) {
     UFILE* f = tmfopen(&tmBundle, path, mode);
     if (!f) { ua_exit(-1); }
     const TMCHAR* line = format_csv(csv);
-    tmfprintf(&tmBundle, f, "{0}\n", line);
+    tmfprintf(&tmBundle, f, "{0,%s}\n", line);
     free((void*)line);
     tmfclose(f);
 }
@@ -336,7 +394,7 @@ void write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv) {
     UFILE* f = tmfopen(&tmBundle, path, mode);
     if (!f) { ua_exit(-1); }
     const TMCHAR* line = format_psv(psv);
-    tmfprintf(&tmBundle, f, "{0}\n", line);
+    tmfprintf(&tmBundle, f, "{0,%s}\n", line);
     free((void*)line);
     tmfclose(f);
 }
@@ -377,6 +435,13 @@ void run_test_fmt(const TMCHAR** items /*, const TMCHAR* expected */) {
     free((void*)result);
 }
 
+void run_test_fmt_dsv(const TMCHAR** items, enum Quoting qstyle,
+                      TMCHAR q, TMCHAR d, TMCHAR e) {
+    const TMCHAR* result = format_dsv(items, qstyle, q, d, e);
+    EPRINTF(_TMC("Ended up with %s\n"), result);
+    free((void*)result);
+}
+
 int main(void) {
     const TMCHAR* ans1[] = {_TMC("one"), _TMC("two"), _TMC("three"), NULL};
     run_test_csv(_TMC("one,two,three"), ans1);
@@ -408,6 +473,11 @@ int main(void) {
     run_test_fmt(ans3);
     run_test_fmt(ans4);
     run_test_fmt(ans5);
+
+    run_test_fmt_dsv(ans1, QUOTE_NECESSARY, _TMC('"'), _TMC(','), _TMC('\\'));
+    run_test_fmt_dsv(ans1, QUOTE_NECESSARY, _TMC('"'), _TMC(','), _TMC('"'));
+    run_test_fmt_dsv(ans2, QUOTE_NECESSARY, _TMC('"'), _TMC(','), _TMC('\\'));
+    run_test_fmt_dsv(ans2, QUOTE_NECESSARY, _TMC('"'), _TMC(','), _TMC('"'));
 
     return 0;
 }

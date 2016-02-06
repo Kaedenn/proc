@@ -100,11 +100,19 @@ const TMCHAR** parse_psv(const TMCHAR* line); /* uses pipes */
 enum Quoting {
     QUOTE_NECESSARY,
     QUOTE_ALL,
-    QUOTE_NONE
+    QUOTE_NONE,
+    QUOTE_NONNUMERIC
 };
 
+/* Generic delimiter-separated-value formatting
+ *
+ * format_csv === format_dsv(..., QUOTE_NECESSARY, _TMC('"'), _TMC(','), 0);
+ *
+ * format_psv === format_dsv(..., QUOTE_NONE, 0, _TMC('|'), 0);
+ *
+ */
 const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
-                         TMCHAR quote, TMCHAR delim);
+                         TMCHAR quote, TMCHAR delim, TMCHAR escape);
 
 const TMCHAR* format_csv(const TMCHAR** entries);
 const TMCHAR* format_psv(const TMCHAR** entries);
