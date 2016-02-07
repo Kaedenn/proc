@@ -1,8 +1,9 @@
 
+#include "csvparse.h"
+
 #include <stdlib.h>
 #include <stdio.h>
-
-#include "csvparse.h"
+#include <errno.h>
 
 /** Notes
  *
@@ -59,8 +60,18 @@ static bool util_isnumeric(const TMCHAR* s) {
     return true;
 }
 
-const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
-                      TMCHAR delim) {
+int strcount(const TMCHAR* s, TMCHAR ch) {
+    int count = 0;
+    for (int i = 0; s[i]; ++i) {
+        if (s[i] == ch) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const TMCHAR* dsvtok(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
+                     TMCHAR delim) {
     const TMCHAR* end = line;
     int state = START_RECORD;
     TMCHAR* buffer;
@@ -157,7 +168,7 @@ const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot,
     return end;
 }
 
-const TMCHAR** split_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
+const TMCHAR** parse_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
     const TMCHAR** results = NULL;
     int ridx = 0;
     /* determine initial size */
@@ -176,7 +187,7 @@ const TMCHAR** split_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
     const TMCHAR* out = NULL;
 
     while (r && *r) {
-        r = tok_dsv(r, &out, q, d);
+        r = dsvtok(r, &out, q, d);
         results[ridx++] = out;
     }
 
@@ -184,11 +195,11 @@ const TMCHAR** split_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
 }
 
 const TMCHAR** parse_csv(const TMCHAR* line) {
-    return split_dsv(line, _TMC('"'), _TMC(','));
+    return parse_dsv(line, _TMC('"'), _TMC(','));
 }
 
 const TMCHAR** parse_psv(const TMCHAR* line) {
-    return split_dsv(line, _TMC('\0'), _TMC('|'));
+    return parse_dsv(line, _TMC('\0'), _TMC('|'));
 }
 
 const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
@@ -289,11 +300,11 @@ const TMCHAR* format_csv(const TMCHAR** entries) {
     for (size_t qidx = 0; entries[qidx]; ++qidx) {
         for (size_t i = 0; entries[qidx][i]; ++i) {
             TMCHAR c = entries[qidx][i];
-            if (c == _TMC(' ') ||   /* quote anything with spaces */
-                c == _TMC('\r') ||  /* quote EOLs */
+            if (c == _TMC('\r') ||  /* quote EOLs */
                 c == _TMC('\n') ||  /* quote EOLs */
                 c == _TMC(',') ||   /* quote commas */
-                (c == _TMC('"') &&  /* quote quotes at the ends */
+                /* quote spaces and quotes at the ends */
+                ((c == _TMC('"') || c == _TMC(' ')) && 
                  (i == 0 || entries[qidx][i+1] == _TMC('\0')))) {
                 should_quote[qidx] = true;
                 break;
@@ -381,22 +392,48 @@ const TMCHAR* format_psv(const TMCHAR** entries) {
     return realloc(buffer, i+1);
 }
 
-void write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv) {
+int write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv) {
     UFILE* f = tmfopen(&tmBundle, path, mode);
-    if (!f) { ua_exit(-1); }
-    const TMCHAR* line = format_csv(csv);
-    tmfprintf(&tmBundle, f, "{0,%s}\n", line);
-    free((void*)line);
+    if (!f) { return -1; }
+    int ret = fwrite_csv(f, csv);
+    if (ret < 0) {
+        int saveerrno = errno;
+        tmfclose(f);
+        errno = saveerrno;
+        return ret;
+    }
     tmfclose(f);
+    return ret;
 }
 
-void write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv) {
+int write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv) {
     UFILE* f = tmfopen(&tmBundle, path, mode);
-    if (!f) { ua_exit(-1); }
-    const TMCHAR* line = format_psv(psv);
-    tmfprintf(&tmBundle, f, "{0,%s}\n", line);
-    free((void*)line);
+    if (!f) { return -1; }
+    int ret = fwrite_psv(f, psv);
+    if (ret < 0) {
+        int saveerrno = errno;
+        tmfclose(f);
+        errno = saveerrno;
+        return ret;
+    }
     tmfclose(f);
+    return ret;
+}
+
+int fwrite_csv(UFILE* file, const TMCHAR** data) {
+    const TMCHAR* line = format_csv(data);
+    if (!line) { return -1; }
+    tmfprintf(&tmBundle, file, "{0,%s}\n", line);
+    free((void*)line);
+    return 0;
+}
+
+int fwrite_psv(UFILE* file, const TMCHAR** data) {
+    const TMCHAR* line = format_csv(data);
+    if (!line) { return -1; }
+    tmfprintf(&tmBundle, file, "{0,%s}\n", line);
+    free((void*)line);
+    return 0;
 }
 
 #ifdef TEST
@@ -408,7 +445,7 @@ void run_test(const TMCHAR* input, const TMCHAR* expected[], TMCHAR q, TMCHAR d)
     const TMCHAR* out = NULL;
     for (int i = 0; expected[i]; ++i) {
         EPRINTF(_TMC("Testing %s...\n"), r);
-        r = tok_dsv(r, &out, q, d);
+        r = dsvtok(r, &out, q, d);
         EPRINTF(_TMC("Obtained \"%s\" (%d)\n"), out, (int)strlen(out));
         EPRINTF(_TMC("Expecting \"%s\"\n"), expected[i]);
         assert(!strcmp(out, expected[i]));

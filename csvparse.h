@@ -34,183 +34,69 @@
 
 #endif
 
-/* RFC 4180 "Common Format and MIME Type for CSV Files" defines the following
- * EBNF grammar for the CSV format:
-
-   file = [header CRLF] record *(CRLF record) [CRLF]
-
-   header = name *(COMMA name)
-
-   record = field *(COMMA field)
-
-   name = field
-
-   field = (escaped / non-escaped)
-
-   escaped = DQUOTE *(TEXTDATA / COMMA / CR / LF / 2DQUOTE) DQUOTE
-
-   non-escaped = *TEXTDATA
-
-   COMMA = %x2C ; encoded in C as ','
-   CR = %x0D    ; encoded in C as '\r'
-   DQUOTE =  %x22   ; encoded in C as '"'
-   LF = %x0A    ; encoded in C as '\n'
-   CRLF = CR LF ; encoded in C as "\r\n"
-   TEXTDATA =  %x20-21 / %x23-2B / %x2D-7E
-*/
-
-/* utility APIs */
-
-/* estimate how many entries the line may have */
-size_t estimate_num_entries(const TMCHAR* line, TMCHAR delim);
-
-/* generic APIs: split delimiter-separated-value formats */
-
-/* passing '\0' for the quote char disables quoting altogether */
+int strcount(const TMCHAR* s, TMCHAR c);
 
 /* strtok replacement: parse line, store the next parsed entry in out, and
  * return the new offset of parsing. Call this repeatedly to split a line.
- *
- * Example usage:
+ * Using '\0' as the quote char disables quoting altogether.
  *
  * const TMCHAR* input = <text input string>;
  *
- * size_t ncols = estimate_num_entries(input, ',');
+ * const int ncols = strcount(input, _TMC(','));
  * TMCHAR **results = calloc(sizeof(TMCHAR*), ncols);
  * size_t idx = 0;
  * const TMCHAR* temp = input;
  * while (temp && *temp) {
- *     temp = tok_dsv(temp, &results[idx], '"', ',');
+ *     temp = dsvtok(temp, &results[idx], '"', ',');
  *     ++idx;
  * }
  *
  */
-const TMCHAR* tok_dsv(const TMCHAR* line, const TMCHAR** out, TMCHAR quot, TMCHAR delim);
+const TMCHAR* dsvtok(const TMCHAR* line, /* line to tokenize */
+                     const TMCHAR** out, /* where to store the results */
+                     TMCHAR quot,        /* quoting char ('\0' to disable) */
+                     TMCHAR delim);      /* delimiting char */
 
-/* convenience function: split line into a NULL-terminated array of strings */
-const TMCHAR** split_dsv(const TMCHAR* line, TMCHAR quot, TMCHAR delim);
-
-/* specific APIs: split actual CSV and PSV (pipe) formats */
-
-const TMCHAR** parse_csv(const TMCHAR* line); /* uses actual CSV grammar */
-const TMCHAR** parse_psv(const TMCHAR* line); /* uses pipes */
-
-/* specific APIs: write items to proper CSV and PSV formats */
-
+/* For format_dsv: specify when quoting should be performed. By default, only
+ * quote fields when necessary.
+ *
+ * "Necessary" means quote fields only when a subsequent parsing would yield
+ * a result different from the initial input.
+ *
+ * "All" means quote everything.
+ *
+ * "None" means quote nothing.
+ *
+ * "NonNumeric" means quote anything that isn't strictly a number.
+ */
 enum Quoting {
-    QUOTE_NECESSARY,
+    QUOTE_NECESSARY = 0,
     QUOTE_ALL,
     QUOTE_NONE,
     QUOTE_NONNUMERIC
 };
 
-/* Generic delimiter-separated-value formatting
- *
- * format_csv === format_dsv(..., QUOTE_NECESSARY, _TMC('"'), _TMC(','), 0);
- *
- * format_psv === format_dsv(..., QUOTE_NONE, 0, _TMC('|'), 0);
- *
- */
 const TMCHAR* format_dsv(const TMCHAR** entries, enum Quoting quote_style,
                          TMCHAR quote, TMCHAR delim, TMCHAR escape);
 
+/* Generic delimiter-separated-value formatting
+ * format_csv === format_dsv(..., QUOTE_NECESSARY, _TMC('"'), _TMC(','), 0);
+ * format_psv === format_dsv(..., QUOTE_NONE, 0, _TMC('|'), 0);
+ */
 const TMCHAR* format_csv(const TMCHAR** entries);
 const TMCHAR* format_psv(const TMCHAR** entries);
 
-void write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv);
-void write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv);
+/* passing '\0' for the quote char disables quoting altogether */
 
-/* TODO:
- * const TMCHAR* line = FORMAT_CSV(opts.pidm, opts.id, opts.name, ...);
- */
+const TMCHAR** parse_dsv(const TMCHAR* line, TMCHAR quot, TMCHAR delim);
+const TMCHAR** parse_csv(const TMCHAR* line); /* uses actual CSV grammar */
+const TMCHAR** parse_psv(const TMCHAR* line); /* uses pipes */
 
-/* Layout
- *
- * struct csv csv = {0};
- * csv.opts.quot = '"';
- * csv.opts.delim = ',';
- * csv.opts.header = false;
- * csv.ncols = 4;
- * csv.size = 0;
- * csv.capacity = 20;
- * csv.records = calloc(sizeof(struct csv_record), csv.capacity);
- *
- * If a row has more entries than the number of configured columns,
- * then the extra entries are dropped.
- *
- * If a row has fewer entries than the number of configured columns,
- * then the missing entries are set to NULL.
- *
- * (This ensures every record is of the same length)
- *
- * The default (NULL) allocator uses a power-of-two algorithm; once
- * capacity is reached, the capacity is doubled. This is referred to by
- * the csv_expand typedef, as csv_obj.expand_fn.
- *
- */
+int write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** csv);
+int write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** psv);
 
-#if 0
-
-typedef size_t(csv_expand)(size_t bytes);
-
-struct csv_options {
-    TMCHAR quot;
-    TMCHAR delim;
-    bool header;
-};
-
-struct csv_record {
-    TMCHAR** entries;
-};
-
-struct csv {
-    struct csv_options opts;
-    size_t ncols;
-    size_t size;
-    size_t capacity;
-    struct csv_record header;
-    struct csv_record* records;
-    csv_expand *expand_fn;
-};
-
-/* constructors */
-
-struct csv* csv_alloc(struct csv_options* opts, size_t ncols, size_t capacity);
-struct csv* parse_file(const TMCHAR* path);
-
-/* allocate a proper CSV struct with initial configuration */
-struct csv* csv_alloc_csv(size_t ncols, size_t capacity);
-
-/* allocate a proper PSV (pipe) struct with initial configuration */
-struct csv* csv_alloc_psv(size_t ncols, size_t capacity);
-
-/* destructor */
-
-void csv_free(struct csv* csv);
-
-/* mutators */
-
-/* set or update the headers */
-void csv_set_header(struct csv* csv, struct csv_record* record);
-void csv_parse_header(struct csv* csv, const TMCHAR* line);
-
-/* parse a line and append it to the records stored in the csv, expanding the
- * capacity if necessary */
-void csv_parse_append(struct csv* csv, const TMCHAR* line);
-void csv_append(struct csv* csv, struct csv_record* record);
-
-/* accessors */
-
-/* obtain the name of the column specified (or NULL if no headers) */
-const TMCHAR* csv_header(struct csv* csv, size_t col);
-
-/* obtain the content of the entry at the row and col given */
-const TMCHAR* csv_entry(struct csv* csv, size_t row, size_t col);
-
-/* obtain the content of the entry at the row and col name given */
-const TMCHAR* csv_entry_byname(struct csv* csv, size_t row, const TMCHAR* name);
-
-#endif
+int fwrite_csv(UFILE* file, const TMCHAR** csv);
+int fwrite_psv(UFILE* file, const TMCHAR** psv);
 
 #endif // defined CSVPARSE_HEADER_INCLUDED_
 
