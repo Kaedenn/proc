@@ -32,5 +32,8 @@ testcsv
 # Debug files
 *.dSYM/
 
+# Temp files
+*.swp
+
 # Other stuff
 *.png
