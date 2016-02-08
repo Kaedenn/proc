@@ -1,0 +1,501 @@
+
+#ifndef UA_ORAC_GUA2CSV_HEADER_
+#define UA_ORAC_GUA2CSV_HEADER_
+
+#if !defined(csvBundle_EXISTS)
+#include "tmcilib.h"
+static struct TMBundle csvBundle = {"gua2csv.h", NULL, NULL, NULL, NULL};
+#define csvBundle_EXISTS
+#endif
+
+#include <stdlib.h>
+#include <stdbool.h>
+
+/** @region Utility functions **/
+
+int ua_strcount(const TMCHAR* s, TMCHAR c);
+
+/** @region Parsing functions **/
+
+/* ua_dsvtok(line, output, quotechar, delimchar)
+ *
+ * Parse one entry of @param line into @param out, returning the resulting
+ * position after the parse.
+ *
+ * @param line      input text to parse
+ * @param out       receives parsed record
+ * @param quot      quoting character, use '\0' to disable quoting
+ * @param delim     delimiter character
+ *
+ * Returns NULL on error and a string of length zero on EOL.
+ *
+ * Example:
+ *
+ * const TMCHAR* input = <text input string>;
+ * TMCHAR quote = <quote>;
+ * TMCHAR delim = <delimiter>;
+ * TMCHAR** results;
+ *
+ * const TMCHAR* temp = input;
+ * results = calloc(sizeof(TMCHAR*), ua_strcount(input, delim));
+ * std::size_t idx = 0;
+ * while (temp && *temp) {
+ *     temp = ua_dsvtok(input, &results[idx], quote, delim);
+ *     idx += 1;
+ * }
+ */
+const TMCHAR* ua_dsvtok(const TMCHAR* line,     /* parse this */
+                        const TMCHAR** out,     /* into this */
+                        TMCHAR quot,            /* using this quote */
+                        TMCHAR delim);          /* and this delim */
+
+const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR quote, TMCHAR delim);
+const TMCHAR** ua_parse_csv(const TMCHAR* line);
+const TMCHAR** ua_parse_psv(const TMCHAR* line);
+
+enum UAQuoteStyle {
+    QUOTE_NECESSARY = 0,    /* quote only when necessary (see below) */
+    QUOTE_ALL,              /* quote everything */
+    QUOTE_NONE,             /* disable quoting */
+    QUOTE_NONNUMERIC        /* quote things that aren't numbers */
+};
+
+/* Quoting
+ *
+ * When using QUOTE_NECESSARY, a field is enclosed in quotes if any of the
+ * following conditions are met:
+ *      The field begins or ends with the quote character
+ *      The field begins or ends with a space character: ' '
+ *      The field contains the delimiting character
+ *      The field contains an EOL character: either '\r' or '\n'
+ *
+ * This is to ensure that a round-trip format-parse-format yields exactly the
+ * same data.
+ *
+ * Passing '\0' as a quote character to any function will disable quoting
+ * entirely. This will override a QUOTE_* enumeration.
+ */
+
+/** @region Formatting functions **/
+
+const TMCHAR* ua_format_dsv(const TMCHAR** data,
+                            enum UAQuoteStyle quoting,
+                            TMCHAR quote,
+                            TMCHAR delim,
+                            TMCHAR escape);
+
+/* ua_write_dsv(path, mode, <format-args>);
+ *
+ * Calls ua_format_dsv with <format-args> and writes the results to
+ * @param path, opened with the mode @param mode.
+ *
+ * Returns true on success, false on failure.
+ */
+int ua_write_dsv(const TMCHAR* path, const TMCHAR* mode,
+                  const TMCHAR** data, enum UAQuoteStyle quoting,
+                  TMCHAR quote, TMCHAR delim, TMCHAR escape);
+
+/* ua_fwrite_dsv(file, <format-args>)
+ *
+ * Calls ua_format_dsv with <format-args> and writes the results to
+ * @param file.
+ *
+ * Returns true on success, false on failure.
+ */
+int ua_fwrite_dsv(UFILE* file,
+                   const TMCHAR** data, enum UAQuoteStyle quoting,
+                   TMCHAR quote, TMCHAR delim, TMCHAR escape);
+
+/* ua_format_csv(data)
+ *
+ * Calls ua_format_dsv(data, QUOTE_NECESSARY, _TMC('"'), _TMC(','), 0);
+ */
+const TMCHAR* ua_format_csv(const TMCHAR** data);
+
+/* ua_format_csv(data)
+ *
+ * Calls ua_write_dsv(path, mode, data, QUOTE_NECESSARY,
+ *                    _TMC('"'), _TMC(','), 0);
+ */
+int ua_write_csv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** data);
+
+/* ua_fwrite_csv(file, data)
+ *
+ * Calls ua_fwrite_dsv(file, data, QUOTE_NECESSARY, _TMC('"'), _TMC(','), 0)
+ */
+int ua_fwrite_csv(UFILE* file, const TMCHAR** data);
+
+/* ua_format_psv(data)
+ *
+ * Calls ua_format_dsv(data, QUOTE_NONE, 0, _TMC('|'), 0);
+ */
+const TMCHAR* ua_format_psv(const TMCHAR** data);
+
+/* ua_write_psv(path, mode, data)
+ *
+ * Calls ua_write_dsv(path, mode, data, QUOTE_NONE, 0, _TMC('|'), 0);
+ */
+int ua_write_psv(const TMCHAR* path, const TMCHAR* mode, const TMCHAR** data);
+
+/* ua_fwrite_psv(file, data)
+ *
+ * Calls ua_fwrite_dsv(file, data, QUOTE_NONE, 0, _TMC('|'), 0)
+ */
+int ua_fwrite_psv(UFILE* file, const TMCHAR** data);
+
+#endif
+
+/*
+#ifndef ORACLE_MODE
+#define TMERROR(bundle, ...) do { \
+    tmfprintf(bundle, tmstderr, _TMC("{0}:{1,%d}: "), __FILE__, __LINE__); \
+    tmfprintf(bundle, tmstderr, __VA_ARGS__); \
+} while (0)
+#else
+*/
+#define TMERROR (void)
+/*
+#endif
+*/
+
+enum State {
+    START_RECORD,
+    IN_UNQUOTE,
+    IN_QUOTE,
+    ESCAPE_IN_QUOTE
+};
+
+static int iseol(TMCHAR c) {
+    return c == _TMC('\n') || c == _TMC('\r') || c == _TMC('\0');
+}
+
+static int isws(TMCHAR c) {
+    return c == _TMC(' ');
+}
+
+static int isnum(TMCHAR c) {
+    return c >= _TMC('0') && c <= _TMC('9');
+}
+
+static int isnumeric(const TMCHAR* s) {
+    size_t i = 0;
+    while (s[i]) {
+        if (!isnum(s[i])) return false;
+        ++i;
+    }
+    return true;
+}
+
+int ua_strcount(const TMCHAR* s, TMCHAR ch) {
+    int count = 0;
+    int i;
+    for (i = 0; s[i]; ++i) {
+        if (s[i] == ch) {
+            count += 1;
+        }
+    }
+    return count;
+}
+
+const TMCHAR* ua_dsvtok(const TMCHAR* line, const TMCHAR** out,
+                        TMCHAR quot, TMCHAR delim) {
+    const TMCHAR* end = line;
+    int state = START_RECORD;
+    TMCHAR* buffer;
+    TMCHAR* bufpos;
+    int done = false;
+
+    /* end condition: return an empty string */
+    if (iseol(*line)) {
+        *out = calloc(1, sizeof(TMCHAR));
+        return line;
+    }
+
+    /* So, how much memory do we allocate? Well, we're not inserting anything
+     * not already present in the input line, so use that as our upper limit */
+    buffer = bufpos = calloc(tmstrlen(line)+1, sizeof(TMCHAR));
+    if (!buffer) {
+        /* bail immediately if there's an allocation problem */
+        return NULL;
+    }
+
+    while (!done) {
+        /* parse character pointed to by `end` */
+        TMCHAR c = *end;
+        switch (state) {
+            case START_RECORD: {
+                /* initial state */
+                if (quot && c == quot) {
+                    state = IN_QUOTE;
+                } else if (c == delim || iseol(c)) {
+                    done = true;
+                } else if (isws(c)) {
+                    /* eat initial whitespace */
+                } else {
+                    *bufpos++ = c;
+                    state = IN_UNQUOTE;
+                }
+            } break;
+            case IN_UNQUOTE: {
+                /* main state: inside an unquoted field */
+                if (c == delim || iseol(c)) {
+                    done = true;
+                } else {
+                    *bufpos++ = c;
+                }
+            } break;
+            case IN_QUOTE: {
+                /* main state: inside a quoted field */
+                if (quot && c == quot) {
+                    state = ESCAPE_IN_QUOTE;
+                } else if (c == _TMC('\0')) {
+                    done = true;
+                } else {
+                    /* no check for \r\n because those are allowed here */
+                    *bufpos++ = c;
+                }
+            } break;
+            case ESCAPE_IN_QUOTE: {
+                /* encountered a quote in a quoted field, could be either an
+                 * escaped dquot or the end of a field */
+                if (quot && c == quot) {
+                    /* escaped quote, emit one quote */
+                    *bufpos++ = c;
+                    state = IN_QUOTE;
+                } else if (c == delim || iseol(c)) {
+                    done = true;
+                } else {
+                    /* rogue quote: quote found, but following character isn't
+                     * special; add character literally
+                     */
+                    *bufpos++ = _TMC('"');
+                    *bufpos++ = c;
+                    state = IN_QUOTE;
+                }
+            } break;
+            default:
+                /* unreachable, indicates a serious error */
+                abort();
+                break;
+        }
+        /* never traverse past a NIL */
+        if (c != _TMC('\0')) {
+            ++end;
+        }
+    }
+
+    /* trim ending whitespace (stopping at empty) */
+    while (tmstrlen(buffer) > 0 && isws(buffer[tmstrlen(buffer)-1])) {
+        buffer[tmstrlen(buffer)-1] = _TMC('\0');
+    }
+
+    /* shrink buffer to proper size */
+    *out = realloc(buffer, (tmstrlen(buffer)+1)*sizeof(TMCHAR));
+
+    return end;
+}
+
+const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
+    /* determine initial size */
+    int size = ua_strcount(line, d) + 1;    /* 3 delims -> 4 entries */
+    const TMCHAR** results = NULL;
+    results = calloc(sizeof(const TMCHAR*), size+1); /* +1 for NULL */
+    if (!results) {
+        return NULL;
+    }
+
+    const TMCHAR* r = line;
+    const TMCHAR* out = NULL;
+
+    int ridx = 0;
+    while (r && *r) {
+        if (ridx > size) {
+            tmfprintf(&csvBundle, tmstderr, _TMC("Error parsing {0}: "
+                                                 "Out of bounds writing to "
+                                                 "index {1,%d}. Aborting"),
+                      line, ridx);
+            ua_exit(-1);
+        }
+        r = dsvtok(r, &out, q, d);
+        results[ridx++] = out;
+    }
+
+    return realloc(results, (sizeof(const TMCHAR*)+1)*ridx);
+}
+
+const TMCHAR** ua_parse_csv(const TMCHAR* line) {
+    return ua_parse_dsv(line, _TMC('"'), _TMC(','));
+}
+
+const TMCHAR** ua_parse_psv(const TMCHAR* line) {
+    return ua_parse_dsv(line, _TMC('\0'), _TMC('|'));
+}
+
+const TMCHAR* ua_format_dsv(const TMCHAR** data,
+                             enum UAQuoteStyle quoting,
+                             TMCHAR quote,
+                             TMCHAR delim,
+                             TMCHAR escape) {
+    TMCHAR* buffer = NULL;
+    size_t buflen = 1; /* 1 for NIL terminator */
+    size_t bufpos = 0;
+    size_t nitems = 0;
+    size_t i, j;
+
+    if (quote == _TMC('\0')) {
+        quoting = QUOTE_NONE;
+    } else if (escape == _TMC('\0')) {
+        escape = quote;
+    }
+
+    /* 1) calculate amount of space to allocate for buffer */
+    for (i = 0; data[i]; ++i) {
+        buflen += tmstrlen(data[i]) + 1 /* delim */ + 2 /* quotes */;
+        nitems += 1;
+    }
+
+    /* worst case: every single character needs escaping */
+    buflen *= 2;
+
+    /* short-circuit if nothing to write */
+    if (nitems == 0) {
+        return calloc(sizeof(TMCHAR), 1);
+    }
+
+    /* 2) allocate buffer */
+    buffer = calloc(sizeof(TMCHAR), buflen+1);
+    if (!buffer) {
+        /* let the caller handle errors */
+        return NULL;
+    }
+
+    /* 3) determine which fields to quote */
+    int* should_quote = calloc(sizeof(int), nitems+1);
+    switch (quoting) {
+        case QUOTE_NECESSARY:
+            for (i = 0; i < nitems; ++i) {
+                const TMCHAR* datum = data[i];
+                for (j = 0; datum[j]; ++j) {
+                    TMCHAR c = datum[j];
+                    if (c == _TMC('\r') || c == _TMC('\n') || c == delim) {
+                        should_quote[i] = true;
+                    }
+                    if (j == 0 || datum[j+1] == _TMC('\0')) {
+                        if (c == quote || c == _TMC(' ')) {
+                            should_quote[i] = true;
+                        }
+                    }
+                }
+            }
+            break;
+        case QUOTE_ALL:
+            for (i = 0; i < nitems; ++i) {
+                should_quote[i] = true;
+            }
+            break;
+        case QUOTE_NONE:
+            /* noop: calloc already set everything to false */
+            break;
+        case QUOTE_NONNUMERIC:
+            for (i = 0; i < nitems; ++i) {
+                should_quote[i] = !ua_isnumeric(data[i]);
+            }
+            break;
+        default:
+            TMERROR(&csvBundle, _TMC("Error: invalid quoting style {0,%d}"),
+                    quoting);
+            free((void*)buffer);
+            free((void*)should_quote);
+            return NULL;
+    }
+
+    /* 4) fill the buffer with data */
+    for (i = 0; data[i]; ++i) {
+        if (i != 0) {
+            buffer[bufpos++] = delim;
+        }
+        if (should_quote[i]) {
+            buffer[bufpos++] = quote;
+        }
+        for (j = 0; data[i][j]; ++j) {
+            TMCHAR c = data[i][j];
+            if (c == quote || c == delim || c == escape) {
+                buffer[bufpos++] = escape;
+            }
+            buffer[bufpos++] = c;
+        }
+        if (should_quote[i]) {
+            buffer[bufpos++] = quote;
+        }
+    }
+
+    assert(bufpos < buflen);
+
+    /* 5) clean up and return result */
+    free((void*)should_quote);
+    return realloc(buffer, tmstrlen(buffer)+1);
+}
+
+const TMCHAR* ua_format_csv(const TMCHAR** data) {
+    return ua_format_dsv(data, QUOTE_NECESSARY, _TMC('"'), _TMC(','),
+                         _TMC('\0'));
+}
+
+const TMCHAR* ua_format_psv(const TMCHAR** data) {
+    return ua_format_dsv(data, QUOTE_NONE, _TMC('\0'), _TMC('|'), _TMC('\0'));
+}
+
+int ua_write_dsv(const TMCHAR* path, const TMCHAR* mode,
+                  const TMCHAR** data, enum UAQuoteStyle quoting,
+                  TMCHAR quote, TMCHAR delim, TMCHAR escape) {
+    UFILE* f = tmfopen(&csvBundle, path, mode);
+    if (!f) {
+        return false;
+    }
+
+    if (!ua_fwrite_dsv(f, data, quoting, quote, delim, escape)) {
+        int save_errno = errno;
+        tmfclose(f);
+        errno = save_errno;
+        return false;
+    }
+
+    tmfclose(f);
+    return true;
+}
+
+int ua_write_csv(const TMCHAR* path, const TMCHAR* mode,
+                  const TMCHAR** data) {
+    return ua_write_dsv(path, mode, data, QUOTE_NECESSARY, _TMC('"'),
+                        _TMC(','), _TMC('\0'));
+}
+
+int ua_write_psv(const TMCHAR* path, const TMCHAR* mode,
+                  const TMCHAR** data) {
+    return ua_write_dsv(path, mode, data, QUOTE_NONE, _TMC('\0'),
+                        _TMC('|'), _TMC('\0'));
+}
+
+int ua_fwrite_dsv(UFILE* file,
+                  const TMCHAR** data, enum UAQuoteStyle quoting,
+                  TMCHAR quote, TMCHAR delim, TMCHAR escape) {
+    const TMCHAR* buffer = ua_format_dsv(data, quoting, quote, delim, escape);
+    if (!buffer) {
+        return false;
+    }
+
+    tmfprintf(&csvBundle, file, _TMC("{0}\n"), buffer);
+    tmfclose(file);
+    return true;
+}
+
+int ua_fwrite_csv(UFILE* file, const TMCHAR** data) {
+    return ua_fwrite_dsv(file, data, QUOTE_NECESSARY, _TMC('"'), _TMC(','),
+                         _TMC('\0'));
+}
+
+int ua_fwrite_psv(UFILE* file, const TMCHAR** data) {
+    return ua_fwrite_dsv(file, data, QUOTE_NONE, _TMC('\0'), _TMC('|'),
+                         _TMC('\0'));
+}
+
