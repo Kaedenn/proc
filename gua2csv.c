@@ -9,6 +9,7 @@
 /* UA AUDIT TRAIL                                                            */
 /*                                                                           */
 /* 2016/02/12 sxpws Initial commit                                           */
+/* 2016/02/14 sxpws Added ua_free_dsv                                        */
 /*                                                                           */
 /* UA AUDIT TRAIL END                                                        */
 /*****************************************************************************/
@@ -179,7 +180,7 @@ const TMCHAR* ua_dsvtok(const TMCHAR* line, const TMCHAR** out,
 
 const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
     /* determine initial size */
-    int size = ua_strcount(line, d) + 1;    /* 3 delims -> 4 entries */
+    int size = ua_strcount(line, d) + 1; /* +1 as N delims -> N+1 entries */
     const TMCHAR** results = NULL;
     results = calloc(sizeof(const TMCHAR*), size+1); /* +1 for NULL */
     if (!results) {
@@ -206,7 +207,7 @@ const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
         results[ridx++] = out;
     }
 
-    return realloc(results, (sizeof(const TMCHAR*)+1)*ridx);
+    return realloc(results, sizeof(const TMCHAR*)*(ridx+1));
 }
 
 const TMCHAR** ua_parse_csv(const TMCHAR* line) {
@@ -215,6 +216,15 @@ const TMCHAR** ua_parse_csv(const TMCHAR* line) {
 
 const TMCHAR** ua_parse_psv(const TMCHAR* line) {
     return ua_parse_dsv(line, PSV_Q, PSV_D);
+}
+
+void ua_free_dsv(const TMCHAR** data) {
+    const TMCHAR** curr = data;
+    while (*curr) {
+        free((void*)*curr);
+        ++curr;
+    }
+    free((void*)data);
 }
 
 /* }}} REGION: DSV PARSER */
@@ -395,6 +405,35 @@ int ua_fwrite_psv(UFILE* file, const TMCHAR** data) {
 /* {{{ REGION: DSV SELECT */
 #if 0
 
+/* What do we have here, you ask?
+ *
+ * Well, I'd like to be able to run something akin to:
+ *
+ * ua_dsv_select(UFILE* file, const TMCHAR* query, const TMCHAR** args,
+ *               enum UAQuoteStyle quoting, TMCHAR quotechar,
+ *               TMCHAR delimchar, TMCHAR escapechar)
+ *
+ * and have it be called as
+ *
+ * const TMCHAR** args = {_TMC("31168931"), NULL};
+ * ua_dsv_select(tmstdout, _TMC(
+ *      "SELECT spriden_first_name, "
+ *             "spriden_mi, "
+ *             "spriden_last_name, "
+ *             "spriden_id "
+ *        "FROM spriden "
+ *       "WHERE spriden_id=:id"), args, QUOTE_NEEDED, '"', ',', '\0');
+ *
+ * which would result in the results of that query being written to stdout as
+ * properly formatted CSV.
+ *
+ * Due to some limitations of PMIG, I can't get this to work quite yet.
+ *
+ * Due to Pro*C limitations, I doubt this will work with inline SQL without
+ * some insane C99 preprocessor hackery, which is turning out to be more
+ * trouble than it's worth.
+ */
+
 static void strnarrow(const TMCHAR* src, char* dest) {
     while ((*dest++ = (char)*src++)) ;
 }
@@ -530,6 +569,7 @@ void ua_dsv_select(UFILE* out, const TMCHAR* query, const TMCHAR** inputs,
         }
 
         ua_fwrite_dsv(out, row, quoting, quote, delim, escape);
+        ua_free_dsv(row);
     }
 
     EXEC SQL CLOSE psv_cur; POSTORA;

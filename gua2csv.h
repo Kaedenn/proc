@@ -9,6 +9,7 @@
 /* UA AUDIT TRAIL                                                            */
 /*                                                                           */
 /* 2016/02/12 sxpws Initial commit                                           */
+/* 2016/02/14 sxpws Added ua_free_dsv                                        */
 /*                                                                           */
 /* UA AUDIT TRAIL END                                                        */
 /*****************************************************************************/
@@ -44,7 +45,9 @@ int ua_strcount(const TMCHAR* s, TMCHAR c);
 /* ua_dsvtok(line, output, quotechar, delimchar)
  *
  * Parse one entry of @param line into @param out, returning the resulting
- * position after the parse.
+ * position after the parse. While technically a private API, this function is
+ * exposed under the assumption that it may be useful for extremely large
+ * datasets.
  *
  * @param line      input text to parse
  * @param out       receives parsed record
@@ -55,11 +58,13 @@ int ua_strcount(const TMCHAR* s, TMCHAR c);
  *
  * Example:
  *
+ * // specify input data, configuration, and declare the output variable
  * const TMCHAR* input = <text input string>;
  * TMCHAR quote = <quote>;
  * TMCHAR delim = <delimiter>;
  * TMCHAR** results;
  *
+ * // perform the parsing
  * const TMCHAR* temp = input;
  * results = calloc(sizeof(TMCHAR*), ua_strcount(input, delim));
  * std::size_t idx = 0;
@@ -83,7 +88,7 @@ const TMCHAR* ua_dsvtok(const TMCHAR* line,     /* parse this */
  * @param delim     delimiting character to use
  *
  * Returns a NULL-terminated array of NULL-terminated strings or NULL on
- * error.
+ * error. Use ua_free_dsv to free the returned array.
  */
 const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR quote, TMCHAR delim);
 
@@ -98,6 +103,12 @@ const TMCHAR** ua_parse_csv(const TMCHAR* line);
  * Equivalent to ua_parse_dsv(line, '\0', '|');
  */
 const TMCHAR** ua_parse_psv(const TMCHAR* line);
+
+/* ua_free_dsv(data)
+ *
+ * Frees the vector of TMCHAR strings returned by ua_parse_*
+ */
+void ua_free_dsv(const TMCHAR** data);
 
 /* UAQuoteStyle enumeration
  *
@@ -168,6 +179,10 @@ const TMCHAR* ua_format_dsv(const TMCHAR** data,
  * @param path, opened with the mode @param mode.
  *
  * Returns true on success, false on failure.
+ *
+ * If calling this function more than once or for appending data to a file, be
+ * sure to provide _TMC("a") as @param mode, as this function opens
+ * @param path every time it's called.
  */
 int ua_write_dsv(const TMCHAR* path, const TMCHAR* mode,
                  const TMCHAR** data, enum UAQuoteStyle quoting,
