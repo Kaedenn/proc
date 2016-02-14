@@ -1,10 +1,12 @@
 
+/*** BEGIN HEADER gua2csv.h ***/
+
 #ifndef UA_ORAC_GUA2CSV_HEADER_
 #define UA_ORAC_GUA2CSV_HEADER_
 
 #if !defined(csvBundle_EXISTS)
 #include "tmcilib.h"
-static struct TMBundle csvBundle = {"gua2csv.h", NULL, NULL, NULL, NULL};
+static struct TMBundle csvBundle = {"gua2csv.pc", NULL, NULL, NULL, NULL};
 #define csvBundle_EXISTS
 #endif
 
@@ -145,18 +147,9 @@ int ua_fwrite_psv(UFILE* file, const TMCHAR** data);
 
 #endif
 
-/*
-#ifndef ORACLE_MODE
-#define TMERROR(bundle, ...) do { \
-    tmfprintf(bundle, tmstderr, _TMC("{0}:{1,%d}: "), __FILE__, __LINE__); \
-    tmfprintf(bundle, tmstderr, __VA_ARGS__); \
-} while (0)
-#else
-*/
-#define TMERROR (void)
-/*
-#endif
-*/
+/*** END HEADER gua2csv.h ***/
+
+/*** BEGIN SOURCE gua2csv.c ***/
 
 enum State {
     START_RECORD,
@@ -185,6 +178,26 @@ static int isnumeric(const TMCHAR* s) {
     }
     return true;
 }
+
+#ifdef __GNUC__
+
+#define STR_COERCE(src, dest) do {                  \
+    size_t i = 0;                                   \
+    while (dest[i] = (typeof(dest[i]))src[i]) {     \
+        ++i;                                        \
+    }                                               \
+} while (0)
+
+#else
+
+#define STR_COERCE(src, dest) do {  \
+    size_t i = 0;                   \
+    while (dest[i] = src[i]) {      \
+        ++i;                        \
+    }                               \
+} while (0)
+
+#endif /* def __GNUC__ */
 
 int ua_strcount(const TMCHAR* s, TMCHAR ch) {
     int count = 0;
@@ -266,8 +279,7 @@ const TMCHAR* ua_dsvtok(const TMCHAR* line, const TMCHAR** out,
                     done = true;
                 } else {
                     /* rogue quote: quote found, but following character isn't
-                     * special; add character literally
-                     */
+                     * special; add character literally */
                     *bufpos++ = _TMC('"');
                     *bufpos++ = c;
                     state = IN_QUOTE;
@@ -310,9 +322,9 @@ const TMCHAR** ua_parse_dsv(const TMCHAR* line, TMCHAR q, TMCHAR d) {
     int ridx = 0;
     while (r && *r) {
         if (ridx > size) {
-            tmfprintf(&csvBundle, tmstderr, _TMC("Error parsing {0}: "
-                                                 "Out of bounds writing to "
-                                                 "index {1,%d}. Aborting"),
+            tmfprintf(&csvBundle, tmstderr,
+                      _TMC("Error parsing {0}: Out of bounds writing to index "
+                           "{1,%d}. Aborting"),
                       line, ridx);
             ua_exit(-1);
         }
@@ -332,10 +344,10 @@ const TMCHAR** ua_parse_psv(const TMCHAR* line) {
 }
 
 const TMCHAR* ua_format_dsv(const TMCHAR** data,
-                             enum UAQuoteStyle quoting,
-                             TMCHAR quote,
-                             TMCHAR delim,
-                             TMCHAR escape) {
+                            enum UAQuoteStyle quoting,
+                            TMCHAR quote,
+                            TMCHAR delim,
+                            TMCHAR escape) {
     TMCHAR* buffer = NULL;
     size_t buflen = 1; /* 1 for NIL terminator */
     size_t bufpos = 0;
@@ -374,13 +386,12 @@ const TMCHAR* ua_format_dsv(const TMCHAR** data,
     switch (quoting) {
         case QUOTE_NECESSARY:
             for (i = 0; i < nitems; ++i) {
-                const TMCHAR* datum = data[i];
-                for (j = 0; datum[j]; ++j) {
-                    TMCHAR c = datum[j];
+                for (j = 0; data[i][j]; ++j) {
+                    TMCHAR c = data[i][j];
                     if (c == _TMC('\r') || c == _TMC('\n') || c == delim) {
                         should_quote[i] = true;
                     }
-                    if (j == 0 || datum[j+1] == _TMC('\0')) {
+                    if (j == 0 || data[i][j+1] == _TMC('\0')) {
                         if (c == quote || c == _TMC(' ')) {
                             should_quote[i] = true;
                         }
@@ -402,8 +413,8 @@ const TMCHAR* ua_format_dsv(const TMCHAR** data,
             }
             break;
         default:
-            TMERROR(&csvBundle, _TMC("Error: invalid quoting style {0,%d}"),
-                    quoting);
+            tmfprintf(&csvBundle, tmstderr,
+                      _TMC("Error: invalid quoting style {0,%d}\n"), quoting);
             free((void*)buffer);
             free((void*)should_quote);
             return NULL;
@@ -446,14 +457,15 @@ const TMCHAR* ua_format_psv(const TMCHAR** data) {
 }
 
 int ua_write_dsv(const TMCHAR* path, const TMCHAR* mode,
-                  const TMCHAR** data, enum UAQuoteStyle quoting,
-                  TMCHAR quote, TMCHAR delim, TMCHAR escape) {
+                 const TMCHAR** data, enum UAQuoteStyle quoting,
+                 TMCHAR quote, TMCHAR delim, TMCHAR escape) {
     UFILE* f = tmfopen(&csvBundle, path, mode);
     if (!f) {
         return false;
     }
 
     if (!ua_fwrite_dsv(f, data, quoting, quote, delim, escape)) {
+        /* save errno because fclose is allowed to modify it */
         int save_errno = errno;
         tmfclose(f);
         errno = save_errno;
@@ -465,13 +477,13 @@ int ua_write_dsv(const TMCHAR* path, const TMCHAR* mode,
 }
 
 int ua_write_csv(const TMCHAR* path, const TMCHAR* mode,
-                  const TMCHAR** data) {
+                 const TMCHAR** data) {
     return ua_write_dsv(path, mode, data, QUOTE_NECESSARY, _TMC('"'),
                         _TMC(','), _TMC('\0'));
 }
 
 int ua_write_psv(const TMCHAR* path, const TMCHAR* mode,
-                  const TMCHAR** data) {
+                 const TMCHAR** data) {
     return ua_write_dsv(path, mode, data, QUOTE_NONE, _TMC('\0'),
                         _TMC('|'), _TMC('\0'));
 }
@@ -485,7 +497,7 @@ int ua_fwrite_dsv(UFILE* file,
     }
 
     tmfprintf(&csvBundle, file, _TMC("{0}\n"), buffer);
-    tmfclose(file);
+    free((void*)buffer);
     return true;
 }
 
@@ -498,4 +510,8 @@ int ua_fwrite_psv(UFILE* file, const TMCHAR** data) {
     return ua_fwrite_dsv(file, data, QUOTE_NONE, _TMC('\0'), _TMC('|'),
                          _TMC('\0'));
 }
+
+#undef STR_COERCE
+
+/*** END SOURCE gua2csv.c ***/
 
